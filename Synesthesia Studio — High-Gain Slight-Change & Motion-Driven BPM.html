@@ -1,0 +1,256 @@
+<!-- ... existing code ... -->
+          <div class="metric-card">
+            <div class="metric-top">
+              <span>MOTION</span>
+              <strong id="valMotion" style="color:var(--accent-emerald)">0%</strong>
+            </div>
+            <div class="meter-track">
+              <div class="meter-fill" id="barMotion" style="background:linear-gradient(90deg,#10b981,#34d399)"></div>
+            </div>
+            <div class="metric-sub">Frame Delta → Live BPM &amp; Arp</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-top">
+              <span>LIVE BPM • MOTION</span>
+              <strong id="valLiveBpm" style="color:var(--accent-cyan)">110 BPM</strong>
+            </div>
+            <div class="meter-track">
+              <div class="meter-fill" id="barBpmPulse" style="background:linear-gradient(90deg,#22d3ee,#818cf8)"></div>
+            </div>
+            <div class="metric-sub" id="bpmRangeSub">Range: 68–172 BPM (Motion Driven)</div>
+          </div>
+<!-- ... existing code ... -->
+        <div class="two-col">
+          <div class="slider-card micro-highlight">
+            <div class="slider-head">
+              <span style="color:#f5d0fe;font-weight:700;">SLIGHT-CHANGE GAIN • सूक्ष्म</span>
+              <strong id="microDramaVal" style="color:#f5d0fe">92%</strong>
+            </div>
+            <input id="microDramaSlider" type="range" min="0" max="100" value="92" />
+          </div>
+
+          <div class="slider-card micro-highlight">
+            <div class="slider-head">
+              <span style="color:#fde68a;font-weight:700;">MOTION → BPM DRIVE</span>
+              <strong id="motionBpmDriveVal" style="color:#fde68a">85%</strong>
+            </div>
+            <input id="motionBpmDriveSlider" type="range" min="0" max="100" value="85" />
+          </div>
+        </div>
+
+        <!-- Tempo, Optical Sensitivity, Space & Master Gain -->
+        <div class="two-col">
+          <div class="slider-card">
+            <div class="slider-head">
+              <span style="color:var(--text-secondary)">BASE / ANCHOR BPM</span>
+              <strong id="bpmVal" style="color:var(--accent-cyan)">110 BPM</strong>
+            </div>
+            <input id="bpmSlider" type="range" min="65" max="165" value="110" />
+          </div>
+
+          <div class="slider-card">
+            <div class="slider-head">
+              <span style="color:var(--text-secondary)">OPTICAL SENSITIVITY</span>
+              <strong id="sensVal" style="color:var(--accent-emerald)">75%</strong>
+            </div>
+            <input id="sensSlider" type="range" min="10" max="100" value="75" />
+          </div>
+<!-- ... existing code ... -->
+        scale: "lydian",
+        bpm: 110,
+        liveBpm: 110,
+        motionBpmDrive: 0.85,
+        sensitivity: 0.75,
+        microDrama: 0.92,
+        hyperDrama: true,
+        spaceMix: 0.45,
+<!-- ... existing code ... -->
+        /**
+         * Dramatic musical burst when even a tiny micro-change spike occurs:
+         * combines sharp pitch/frequency jumps, rapid filter resonance sweeps,
+         * detuned harmonic bursts, chord/interval shifts, and rhythmic accents.
+         */
+        triggerMicroBurst(spikeVal, col, row) {
+          if (!this.ctx || !appState.audioRunning) return;
+          const nowMs = performance.now();
+          if (nowMs - appState.lastSpikeMs < 65) return;
+          appState.lastSpikeMs = nowMs;
+
+          const scale = SCALES[appState.scaleKey] || SCALES.lydian;
+          const dramaBoost = appState.hyperDrama ? 1.5 : 0.95;
+
+          // Shift active chord progression on medium/strong slight-change bursts
+          if (spikeVal > 0.32 && scale.chords && scale.chords.length > 0) {
+            appState.chordIndex = (appState.chordIndex + 1 + (spikeVal > 0.68 ? 1 : 0)) % scale.chords.length;
+          }
+
+          const idx = Math.min(
+            scale.intervals.length - 1,
+            Math.abs(Math.floor(col * 2 + row + spikeVal * 11 * dramaBoost)) % scale.intervals.length
+          );
+          const octJump = spikeVal > 0.5 ? (appState.hyperDrama ? 24 : 12) : (spikeVal > 0.2 ? 12 : 0);
+          const midi = scale.root + scale.intervals[idx] + octJump;
+
+          const t0 = safeTime(this.ctx, 0.01);
+          // Rapid filter resonance sweep
+          this.filter.Q.cancelScheduledValues(t0);
+          this.filter.Q.setValueAtTime(clampNum(2.5 + spikeVal * 14, 1.5, 18, 6), t0);
+          this.filter.Q.exponentialRampToValueAtTime(2.0, t0 + 0.42);
+
+          this.filter.frequency.cancelScheduledValues(t0);
+          this.filter.frequency.setValueAtTime(clampNum(900 + spikeVal * 9500 * dramaBoost, 350, 12500, 4800), t0);
+          this.filter.frequency.exponentialRampToValueAtTime(480, t0 + 0.42);
+
+          if (this.delay && this.delay.delayTime) {
+            this.delay.delayTime.setTargetAtTime(clampNum(0.09 + (col / 8) * 0.45, 0.05, 1.2, 0.24), t0, 0.02);
+          }
+
+          // Primary pitch jump + detuned harmonic burst + interval shift + rhythmic accent
+          this.playNote(midi, 0.52 + spikeVal * 0.36, 0.45, "micro", 0.95);
+          this.playNote(midi + 12.14, 0.34 + spikeVal * 0.32, 0.34, "arp", 0.9); // detuned octave shimmer
+          this.playNote(midi + (spikeVal > 0.45 ? 7 : 4), 0.38 + spikeVal * 0.34, 0.36, "lead", 0.85);
+          this.playPerc("hat", 0.38 + spikeVal * 0.45);
+          this.playPerc("kick", 0.42 + spikeVal * 0.42);
+
+          const actionEl = document.getElementById("microActionText");
+          if (actionEl) {
+            actionEl.textContent = spikeVal > 0.55
+              ? `⚡ BIG SHIFT → ${midiToName(midi)} + Detune/Chord (C${col + 1},R${row + 1})`
+              : `✦ SLIGHT-CHANGE LEAP → ${midiToName(midi)} (C${col + 1},R${row + 1})`;
+          }
+        }
+// ... existing code ...
+      /* =====================================================================
+         4. MOTION-DRIVEN BPM & SEQUENCER LOOP
+         ===================================================================== */
+      function computeTargetBpm() {
+        const m = appState.metrics;
+        const baseBpm = clampNum(appState.bpm, 65, 165, 110);
+        const drive = clampNum(appState.motionBpmDrive, 0, 1, 0.85);
+        // Combine motion and slight-change spike so any movement noticeably accelerates BPM
+        const motionSignal = clampNum(m.motion * 0.82 + m.spike * 0.45 + m.rawMicro * 2.5, 0, 1, 0.15);
+        // Map motionSignal in [0..1] to [-28 .. +58] BPM offset scaled by motionBpmDrive
+        const deltaBpm = ((motionSignal - 0.18) * 78) * drive;
+        const minBpm = Math.max(58, Math.round(baseBpm - 26 * drive));
+        const maxBpm = Math.min(185, Math.round(baseBpm + 62 * drive));
+        return {
+          target: clampNum(baseBpm + deltaBpm, minBpm, maxBpm, baseBpm),
+          minBpm,
+          maxBpm
+        };
+      }
+
+      let lastSeqScheduleMs = 0;
+
+      function updateMotionDrivenBpm(nowMs = performance.now()) {
+        const { target, minBpm, maxBpm } = computeTargetBpm();
+        // Smooth slew so tempo glides musically without jitter
+        appState.liveBpm = appState.liveBpm * 0.84 + target * 0.16;
+
+        const liveBpmEl = document.getElementById("valLiveBpm");
+        const rangeSubEl = document.getElementById("bpmRangeSub");
+        const bpmBarEl = document.getElementById("barBpmPulse");
+
+        if (liveBpmEl) {
+          liveBpmEl.textContent = `${Math.round(appState.liveBpm)} BPM`;
+        }
+        if (rangeSubEl) {
+          rangeSubEl.textContent = `Range: ${minBpm}–${maxBpm} BPM (Motion Driven)`;
+        }
+        if (bpmBarEl) {
+          const span = Math.max(10, maxBpm - minBpm);
+          const pct = clampNum(((appState.liveBpm - minBpm) / span) * 100, 5, 100, 45);
+          bpmBarEl.style.width = `${Math.round(pct)}%`;
+        }
+
+        // Dynamically adjust 16th-note step interval as liveBpm changes
+        if (appState.audioRunning) {
+          const stepMs = clampNum((60 / Math.max(55, appState.liveBpm) / 4) * 1000, 68, 320, 136);
+          if (!lastSeqScheduleMs || nowMs - lastSeqScheduleMs >= stepMs) {
+            lastSeqScheduleMs = nowMs;
+            tickSequencer();
+          }
+        }
+      }
+
+      function restartSequencer() {
+        if (synth.seqTimer) {
+          clearInterval(synth.seqTimer);
+          synth.seqTimer = null;
+        }
+        lastSeqScheduleMs = performance.now();
+        if (!appState.audioRunning) return;
+        // High-frequency cadence watcher (25ms) that fires steps strictly at dynamic liveBpm
+        synth.seqTimer = setInterval(() => {
+          updateMotionDrivenBpm(performance.now());
+        }, 25);
+      }
+
+      function tickSequencer() {
+        if (!appState.audioRunning) return;
+        const step = appState.stepIndex % 16;
+        const col = step % 8;
+        const m = appState.metrics;
+        const scale = SCALES[appState.scaleKey] || SCALES.lydian;
+        const activeTempo = Math.round(appState.liveBpm || appState.bpm);
+
+        const stepLabel = document.getElementById("stepCounterLabel");
+        if (stepLabel) stepLabel.textContent = `STEP ${String(step + 1).padStart(2, "0")} / 16 • ${activeTempo} BPM`;
+// ... existing code ...
+        // Non-linear Hyper-Amplification so even tiny 0.3%-1.5% changes produce a big musical spike
+        const drama = clampNum(appState.microDrama, 0, 1, 0.92);
+        const gain = 10 + drama * 42 + (appState.hyperDrama ? 18 : 0);
+        const power = appState.hyperDrama ? 0.28 : 0.4;
+        const signal = Math.max(rawMicro * 1.35, bestVal * 0.95);
+        const amplifiedSpike = drama <= 0.01
+          ? 0
+          : clampNum(Math.pow(clampNum(signal * gain, 0, 1, 0), power), 0, 1, 0);
+
+        const m = appState.metrics;
+        m.luminance = m.luminance * 0.72 + avgLum * 0.28;
+        m.texture = m.texture * 0.68 + avgTex * 0.32;
+        m.motion = m.motion * 0.52 + Math.min(1, rawMicro * 6.5 + bestVal * 0.55) * 0.48;
+        m.hue = domHue;
+        m.rawMicro = rawMicro;
+        m.lumDelta = lumD;
+        m.rgbDelta = rgbD;
+        m.edgeDelta = edgeD;
+        m.spike = Math.max(amplifiedSpike, m.spike * 0.64);
+        m.hotspotCol = bestC;
+        m.hotspotRow = bestR;
+
+        const spikeThreshold = appState.hyperDrama ? 0.12 : 0.24;
+        const triggered = drama > 0.02 && m.spike >= spikeThreshold && rawMicro > 0.0008;
+        m.spikeTriggered = triggered;
+
+        if (triggered && appState.audioRunning) {
+          synth.triggerMicroBurst(m.spike, bestC, bestR);
+        }
+// ... existing code ...
+        renderMiniWaveAndSpectrum();
+        updateMotionDrivenBpm(nowMs);
+
+        fpsFrames++;
+// ... existing code ...
+        document.getElementById("microDramaSlider").addEventListener("input", (e) => {
+          const v = clampNum(Number(e.target.value), 0, 100, 92);
+          appState.microDrama = v / 100;
+          document.getElementById("microDramaVal").textContent = `${v}%`;
+        });
+
+        document.getElementById("motionBpmDriveSlider").addEventListener("input", (e) => {
+          const v = clampNum(Number(e.target.value), 0, 100, 85);
+          appState.motionBpmDrive = v / 100;
+          document.getElementById("motionBpmDriveVal").textContent = `${v}%`;
+          updateMotionDrivenBpm(performance.now());
+        });
+
+        document.getElementById("bpmSlider").addEventListener("input", (e) => {
+          const v = clampNum(Number(e.target.value), 65, 165, 110);
+          appState.bpm = v;
+          appState.liveBpm = v;
+          document.getElementById("bpmVal").textContent = `${v} BPM`;
+          updateMotionDrivenBpm(performance.now());
+        });
+// ... existing code ...
